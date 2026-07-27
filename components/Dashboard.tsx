@@ -29,7 +29,7 @@ const TEMP_TEXT: Record<"hot" | "warm" | "cold", string> = { hot: "text-hot", wa
 
 const CONNECTED_LABELS = new Set(Object.values(CONNECTED_DISPOSITIONS));
 
-type SortKey = "name" | "quality" | "touches" | "contacts" | "companies" | "coverage" | "connect" | "reply" | "meetings" | "demos" | "hot";
+type SortKey = "name" | "quality" | "ownedCompanies" | "ownedRooftops" | "touches" | "rooftopsTouched" | "coverage" | "connect" | "reply" | "meetings" | "demos" | "hot";
 type AcctFilter = "all" | "hot" | "warm" | "cold" | "meetings" | "disqualified";
 
 interface Row { ownerId: string; name: string; kind: "sdr" | "ae"; data: RepData; m: PeriodMetrics; touches: number; }
@@ -121,8 +121,9 @@ export default function Dashboard({ snapshot, viewer, teamFilters }: {
   const rows = useMemo<Row[]>(() => {
     const filtered = repFilter === "all" ? allRows : allRows.filter((r) => r.ownerId === repFilter);
     const val = (r: Row): number | string => ({
-      name: r.name.toLowerCase(), quality: r.m.quality.score, touches: r.touches,
-      contacts: r.m.contacts.total, companies: r.m.companies.total, coverage: r.data.book.pct,
+      name: r.name.toLowerCase(), quality: r.m.quality.score, ownedCompanies: r.data.book.rooftops_total,
+      ownedRooftops: r.data.book.rooftops_total, touches: r.touches, rooftopsTouched: r.m.companies.total,
+      coverage: r.data.book.pct,
       connect: r.m.calls.connect_rate, reply: r.m.emails.reply_rate, meetings: r.m.meetings_booked,
       demos: r.m.demos?.scheduled ?? 0, hot: r.m.temp.hot,
     }[sortKey]);
@@ -134,9 +135,9 @@ export default function Dashboard({ snapshot, viewer, teamFilters }: {
   }, [allRows, repFilter, sortKey, sortDir]);
 
   const summary = useMemo(() => {
-    const a = { touches: 0, contacts: 0, companies: 0, calls: 0, connected: 0, denom: 0, meetings: 0, unitsTapped: 0, unitsTotal: 0, hot: 0, active: 0, pending: 0, scheduled: 0, done: 0, atRisk: 0, demosSched: 0, demosComp: 0 };
+    const a = { touches: 0, ownedCompanies: 0, ownedRooftops: 0, rooftopsTouched: 0, calls: 0, connected: 0, denom: 0, meetings: 0, unitsTapped: 0, unitsTotal: 0, hot: 0, active: 0, pending: 0, scheduled: 0, done: 0, atRisk: 0, demosSched: 0, demosComp: 0 };
     for (const r of rows) {
-      a.touches += r.touches; a.contacts += r.m.contacts.total; a.companies += r.m.companies.total;
+      a.touches += r.touches; a.ownedCompanies += r.data.book.rooftops_total; a.ownedRooftops += r.data.book.rooftops_total; a.rooftopsTouched += r.m.companies.total;
       a.calls += r.m.calls.total; a.connected += r.m.calls.connected; a.denom += r.m.calls.connected + r.m.calls.not_connected;
       a.meetings += r.m.meetings_booked; a.unitsTapped += r.data.book.units_tapped; a.unitsTotal += r.data.book.units_total; a.hot += r.m.temp.hot;
       const f = r.data.funnel; // absent on a pre-V2 snapshot (before the deals backfill) — guard
@@ -154,8 +155,8 @@ export default function Dashboard({ snapshot, viewer, teamFilters }: {
   }
 
   function exportCsv() {
-    const head = ["Rep","Quality","Grade","Touches","Calls","Connected","Emails","OpenRate","ReplyRate","UniqContacts","DMcontacts","UniqRooftops","BookUnits","GDs","Singles","UnitsTapped","Coverage","ConnectRate","Meetings","DemosScheduled","DemosCompleted","PipelineActive","Hot","Warm","Cold"];
-    const lines = rows.map((r) => { const m = r.m; const b = r.data.book; return [`"${r.name.replace(/"/g,'""')}"`, m.quality.score, m.quality.grade, r.touches, m.calls.total, m.calls.connected, m.emails.sent, m.emails.open_rate, m.emails.reply_rate, m.contacts.total, m.dm_contacts, m.companies.total, b.units_total, b.gds, b.singles, b.units_tapped, b.pct, m.calls.connect_rate, m.meetings_booked, m.demos?.scheduled ?? "", m.demos?.completed ?? "", r.data.pipeline?.active ?? "", m.temp.hot, m.temp.warm, m.temp.cold].join(","); });
+    const head = ["Rep","Quality","Grade","Touches","Calls","Connected","Emails","OpenRate","ReplyRate","OwnedCompanies","OwnedRooftops","RooftopsTouched","BookUnits","GDs","Singles","UnitsTapped","Coverage","ConnectRate","Meetings","DemosScheduled","DemosCompleted","PipelineActive","Hot","Warm","Cold"];
+    const lines = rows.map((r) => { const m = r.m; const b = r.data.book; return [`"${r.name.replace(/"/g,'""')}"`, m.quality.score, m.quality.grade, r.touches, m.calls.total, m.calls.connected, m.emails.sent, m.emails.open_rate, m.emails.reply_rate, b.rooftops_total, b.rooftops_total, m.companies.total, b.units_total, b.gds, b.singles, b.units_tapped, b.pct, m.calls.connect_rate, m.meetings_booked, m.demos?.scheduled ?? "", m.demos?.completed ?? "", r.data.pipeline?.active ?? "", m.temp.hot, m.temp.warm, m.temp.cold].join(","); });
     const url = URL.createObjectURL(new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = `trackerai-${range ? `${range.from}_${range.to}` : period}-${snapshot.today_et || "snap"}.csv`; a.click(); URL.revokeObjectURL(url);
   }
@@ -252,14 +253,13 @@ export default function Dashboard({ snapshot, viewer, teamFilters }: {
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatTile label="Touches" value={fmt(summary.touches)} icon={Activity} accent="primary"
           sub={<>{fmt(summary.calls)} dials · {fmt(summary.connected)} conn · {fmt(summary.emails)} email</>} />
-        <StatTile label="Contacts" value={fmt(summary.contacts)} icon={Users} accent="primary" sub="unique · this period" />
-        <StatTile label="Rooftops" value={fmt(summary.companies)} icon={Building2} accent="primary" sub="unique · this period" />
+        <StatTile label="Owned companies" value={fmt(summary.ownedCompanies)} icon={Users} accent="primary" sub="owned rooftop count" />
+        <StatTile label="Owned rooftops" value={fmt(summary.ownedRooftops)} icon={Building2} accent="primary" sub="distinct rooftop accounts" />
+        <StatTile label="Rooftops touched" value={fmt(summary.rooftopsTouched)} icon={Building2} accent="primary" sub="unique tapped rooftops" />
         <StatTile label="Book coverage" value={summary.unitsTotal ? pct0(summary.coverage) : "—"} icon={Gauge} accent="primary"
-          sub={summary.unitsTotal ? `${fmt(summary.unitsTapped)}/${fmt(summary.unitsTotal)} accounts` : "—"} />
+          sub={summary.unitsTotal ? `${fmt(summary.unitsTapped)}/${fmt(summary.unitsTotal)} units` : "—"} />
         <StatTile label="Connect rate" value={pct(summary.connectRate)} icon={PhoneCall} accent="good"
           sub={`${fmt(summary.connected)}/${fmt(summary.denom)} connected`} />
-        <StatTile label="Meetings" value={fmt(summary.meetings)} icon={CalendarCheck} accent="good"
-          sub={<span className="inline-flex items-center gap-1"><Flame className="h-3 w-3 text-hot" />{fmt(summary.hot)} hot accounts</span>} />
       </div>
 
       <FunnelStrip pending={summary.pending} scheduled={summary.scheduled} done={summary.done} atRisk={summary.atRisk} lens={kindMode}
@@ -273,8 +273,9 @@ export default function Dashboard({ snapshot, viewer, teamFilters }: {
                 <SortHeader onClick={() => toggleSort("name")} active={sortKey === "name"} dir={sortDir}>Rep</SortHeader>
                 <SortHeader onClick={() => toggleSort("quality")} active={sortKey === "quality"} dir={sortDir}>Quality</SortHeader>
                 <SortHeader right onClick={() => toggleSort("touches")} active={sortKey === "touches"} dir={sortDir}>Touches</SortHeader>
-                <SortHeader right onClick={() => toggleSort("contacts")} active={sortKey === "contacts"} dir={sortDir}>Contacts</SortHeader>
-                <SortHeader right onClick={() => toggleSort("companies")} active={sortKey === "companies"} dir={sortDir}>Rooftops</SortHeader>
+                <SortHeader right onClick={() => toggleSort("ownedCompanies")} active={sortKey === "ownedCompanies"} dir={sortDir}>Owned Companies</SortHeader>
+                <SortHeader right onClick={() => toggleSort("ownedRooftops")} active={sortKey === "ownedRooftops"} dir={sortDir}>Owned Rooftops</SortHeader>
+                <SortHeader right onClick={() => toggleSort("rooftopsTouched")} active={sortKey === "rooftopsTouched"} dir={sortDir}>Rooftops Touched</SortHeader>
                 <SortHeader onClick={() => toggleSort("coverage")} active={sortKey === "coverage"} dir={sortDir}>Coverage</SortHeader>
                 <SortHeader onClick={() => toggleSort("connect")} active={sortKey === "connect"} dir={sortDir}>Connect</SortHeader>
                 <SortHeader right onClick={() => toggleSort("reply")} active={sortKey === "reply"} dir={sortDir}>Reply</SortHeader>
@@ -409,6 +410,7 @@ function RepRow({ row, onOpen, onOpenCalling }: { row: Row; onOpen: () => void; 
           <Phone className="h-2.5 w-2.5" />{fmt(m.contacts.via_call)}<Mail className="ml-0.5 h-2.5 w-2.5" />{fmt(m.contacts.via_email)}
         </div>
       </td>
+      <td className={cn("px-3 py-2.5 text-right", drill)} onClick={calling("rooftops")} title="Owned companies: unique rooftop accounts owned by this rep">{fmt(row.data.book.rooftops_total)}</td>
       <td className={cn("px-3 py-2.5 text-right font-mono tabular-nums text-ink", drill)} onClick={calling("rooftops")}
         title="Which rooftops were called — who within them, with outcomes">{fmt(m.companies.total)}</td>
       <td className="px-3 py-2.5">
