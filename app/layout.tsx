@@ -33,6 +33,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <head>
+        <script
+          // Set data-theme before paint so the dark-mode toggle doesn't flash light on load.
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('trackerai-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      </head>
       <body>
         {children}
         <SpeedInsights />
