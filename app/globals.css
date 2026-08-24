@@ -53,6 +53,44 @@
   --shadow-pop: 0 8px 30px rgba(16, 18, 24, 0.12);
 }
 
+/* Dark theme override, toggled by ThemeToggle setting [data-theme] on <html>. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #0f1115;
+  --surface: #171a21;
+  --surface-muted: #1e222b;
+  --line: #2a2f3a;
+  --line-strong: #383e4c;
+
+  --ink: #edeef2;
+  --ink-muted: #a6acba;
+  --ink-subtle: #767c8a;
+
+  --primary: #6366f1;
+  --primary-strong: #818cf8;
+  --primary-weak: #232544;
+  --primary-fg: #ffffff;
+
+  --good: #34d399;
+  --good-weak: #113328;
+  --warn: #f0a83c;
+  --warn-weak: #3a2c12;
+  --danger: #f87171;
+  --danger-weak: #3a1a1a;
+
+  --hot: #f87171;
+  --hot-weak: #3a1a1a;
+  --warm: #fbbf24;
+  --warm-weak: #3a2c12;
+  --cold: #60a5fa;
+  --cold-weak: #16233d;
+
+  --ring: rgba(99, 102, 241, 0.45);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.55);
+}
+
 html,
 body {
   background: var(--canvas);

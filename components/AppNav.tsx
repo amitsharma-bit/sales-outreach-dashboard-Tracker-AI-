@@ -1,6 +1,7 @@
 import { Radar, ShieldCheck } from "lucide-react";
 import { Viewer } from "../lib/spine/types";
 import LogoutButton from "./LogoutButton";
+import ThemeToggle from "./ThemeToggle";
 import { cn } from "./ui";
 
 type Tab = "overview" | "accounts" | "attention" | "admin";
@@ -42,6 +43,7 @@ export default function AppNav({ active, viewer }: { active: Tab; viewer: Viewer
             <ShieldCheck className="h-3 w-3" />
             {viewer.role}
           </span>
+          <ThemeToggle />
           <LogoutButton />
         </div>
       </div>
