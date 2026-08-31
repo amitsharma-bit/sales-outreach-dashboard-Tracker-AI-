@@ -12,8 +12,8 @@
  */
 import { SLACK_REPORTS, SlackReportConfig } from "../../config/slack-reports";
 import { assembleCallBlitzReport } from "./build";
-import { formatCallBlitzMessage } from "./format";
-import { sendSlackMessage } from "./deliver";
+import { renderCallBlitzImage } from "./renderImage";
+import { sendSlackImage } from "./deliver";
 import { dueSlotFor } from "./dueSlot";
 
 export { dueSlotFor };
@@ -21,13 +21,15 @@ export { dueSlotFor };
 export interface SchedulerRunResult { checked: number; fired: number; skipped: number; errors: number; }
 
 /** Runs one report immediately (bypasses the due-time check) — used by the scheduler once a
- *  report is due, and directly by the "Send Test" / "Run Now" server actions. */
+ *  report is due, and directly by the "Send Test" / "Run Now" one-shot script. Renders an image
+ *  matching the web Preview panel exactly (same CallBlitzReport data, same excludeOwnerNames) and
+ *  posts it via the Slack Bot Token file-upload flow — Incoming Webhooks can't upload files. */
 export async function runOneReport(report: SlackReportConfig, opts: { test?: boolean } = {}): Promise<{ ok: boolean; error?: string }> {
   try {
-    const reportData = await assembleCallBlitzReport({ managerKey: report.managerKey });
-    const { text } = formatCallBlitzMessage(reportData, { test: opts.test });
-    await sendSlackMessage({ channelLabel: report.channelLabel, envVarKey: report.channelEnvVar }, text);
-    console.log(`[slack-reports] ${opts.test ? "TEST " : ""}sent "${report.name}" to ${report.channelLabel}`);
+    const reportData = await assembleCallBlitzReport({ managerKey: report.managerKey, excludeOwnerNames: report.excludeOwnerNames });
+    const png = await renderCallBlitzImage(reportData, { test: opts.test });
+    await sendSlackImage(report.channelId, png, { title: `Call Blitz Report — ${report.name}`, test: opts.test });
+    console.log(`[slack-reports] ${opts.test ? "TEST " : ""}sent "${report.name}" to channel ${report.channelId}`);
     return { ok: true };
   } catch (e) {
     const message = e instanceof Error ? e.message : "unknown error";

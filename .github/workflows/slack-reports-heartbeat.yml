@@ -8,8 +8,9 @@ name: Slack reports heartbeat
 #   * primary  - self re-dispatch at the end of each ~5h20m loop (needs GH_DISPATCH_TOKEN, a PAT
 #                with actions:write; GITHUB_TOKEN cannot trigger workflow_dispatch by design).
 #   * fallback - a coarse schedule cold-starts a new loop if the self-dispatch chain ever breaks.
-# The DB-backed idempotency ledger (sdr_slack_report_runs unique constraint) makes any trigger
-# overlap safe — a second check of an already-fired slot just no-ops.
+# No database is involved: reports are a static list (config/slack-reports.ts). Idempotency comes
+# from cadence, not a claimed row — dueSlotFor's tolerance window (10 min) matches this loop's
+# interval, and cancel-in-progress:true guarantees one loop instance at a time.
 on:
   workflow_dispatch:
   schedule:
@@ -28,12 +29,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - name: Scheduler loop (every ~10 min for ~5h20m)
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SLACK_VAIBHAV_WEBHOOK: ${{ secrets.SLACK_VAIBHAV_WEBHOOK }}
-          SLACK_RAJVEER_WEBHOOK: ${{ secrets.SLACK_RAJVEER_WEBHOOK }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           END=$(( $(date +%s) + 19200 ))
           CYCLE=0
