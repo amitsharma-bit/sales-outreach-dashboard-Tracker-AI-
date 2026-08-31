@@ -34,9 +34,10 @@ the full **lead→demo→closure funnel** + **intelligence** on top:
   Report config (team/channel/schedule) is a plain code file (`config/slack-reports.ts`), **not a
   database table** — a small fixed set of teams doesn't need admin-editable DB config, and this
   avoids an extra schema + RLS + PostgREST-cache surface. Per-team schedule (1-2x/day,
-  day-of-week, IANA timezone) via a self-redispatching GitHub Actions heartbeat; delivery is a
-  Slack Incoming Webhook resolved server-side from an env var, never stored or returned to the
-  browser.
+  day-of-week, IANA timezone) via a self-redispatching GitHub Actions heartbeat; delivery renders
+  an image matching the web preview (headless Chromium via Playwright) and posts it through a
+  single shared Slack Bot Token, resolved server-side from an env var, never stored or returned to
+  the browser. A report can exclude specific reps entirely via `excludeOwnerNames`.
 
 Surfaces: **Overview** (`/`, the rep table + Demo funnel + SDR/AE toggle), **Accounts** (`/accounts`,
 owned book by demo-status with GD→rooftop→contact drill, Deal Health/Temperature + last-activity),
@@ -77,8 +78,8 @@ spec is the design record for its feature; the phase-1/2/3 ones are historical).
 | `npm run agent:briefs` | Refresh grounded Account Briefs for watched accounts (timeline + content + deals → `sdr_agent_briefs`); needs `OPENAI_API_KEY`; runs as the 2nd step of `spine-agent.yml` |
 | `npm run embed:content` | Index new `sdr_activity_content` rows into `sdr_embeddings` (pgvector; idempotent, new rows only); needs `OPENAI_API_KEY`; runs nightly after `content:backfill` in `spine-reconcile.yml` |
 | `npm run intel:signals` | Mine typed signals (objections/competitors/buying signals/risks/commitments/timing) from new content → `sdr_intel_signals`; idempotent via the `sdr_intel_scans` ledger, newest content first, cap `INTEL_SCAN_CAP` (default 2500/run); needs `OPENAI_API_KEY`; runs nightly after `embed:content` |
-| `npm run slack-reports:run` | One scheduler pass: fires every enabled `sdr_slack_reports` row due right now (per its tz/days/times), idempotent via `sdr_slack_report_runs`; runs every ~10 min via `spine`-style heartbeat (`slack-reports-heartbeat.yml`) |
-| `npm run slack-reports:run-once` | Ad-hoc single-report fire (`REPORT_ID=<uuid> npm run slack-reports:run-once`) — the "Run Now" button dispatches `slack-reports-run-once.yml`, which calls this |
+| `npm run slack-reports:run` | One scheduler pass: fires every enabled `config/slack-reports.ts` entry due right now (per its tz/days/times); runs every ~10 min via a `spine`-style heartbeat (`slack-reports-heartbeat.yml`) |
+| `npm run slack-reports:run-once` | Ad-hoc single-report fire (`REPORT_KEY=<key> TEST_MODE=true\|false npm run slack-reports:run-once`) — the "Run Now"/"Send Test" buttons dispatch `slack-reports-run-once.yml`, which calls this |
 
 All non-`dev`/`build`/`lint`/`test`/`start` scripts run via `tsx --conditions=react-server` — required so
 the `server-only` guard in `lib/supabase/admin.ts` resolves to a no-op under plain Node. Scripts
@@ -374,16 +375,17 @@ Deal Health, stage, at-risk/revive flags) and `last_activity` (date/type/outcome
   `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (auth) + `SUPABASE_SERVICE_ROLE_KEY`
   (spine + call-quality + agent, server-only); `OPENAI_API_KEY` (+ optional `OPENAI_MODEL`, default
   `gpt-4o-mini`) for the agent; `CRON_SECRET` (optional, `/api/sync/delta`); `BLOB_READ_WRITE_TOKEN`
-  (optional Blob fallback); one `SLACK_<NAME>_WEBHOOK` per `config/slack-reports.ts` entry (e.g.
-  `SLACK_VAIBHAV_WEBHOOK`, `SLACK_RAJVEER_WEBHOOK` — server-only, referenced by name only from that
-  config file's `channelEnvVar`, never stored in a database or logged as a value). **In prod the
-  middleware fails CLOSED (503) if the `NEXT_PUBLIC_SUPABASE_*` vars are missing.** GitHub crons need
-  repo (Actions) secrets `HUBSPOT_PAT`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`
-  (agent), every `SLACK_*_WEBHOOK` (Slack Reports heartbeat), and **`GH_DISPATCH_TOKEN`** (a
-  fine-grained PAT minted by the `salesops-lab` GitHub account, `actions:write` — powers the delta
-  heartbeat self-redispatch, the admin add-user owner-pull dispatch, AND the Slack Reports heartbeat
-  self-redispatch; also lives in Vercel env for the server-action path; PATs are repo-owner-scoped,
-  so a repo transfer kills them — re-mint from the new owner).
+  (optional Blob fallback); **`SLACK_BOT_TOKEN`** — ONE shared Slack Bot Token (`xoxb-...`, scopes
+  `files:write`+`chat:write`) authenticating every Slack Reports send, server-only, never stored in
+  a database or logged as a value (`config/slack-reports.ts` entries carry a `channelId`, not a
+  secret, per report). **In prod the middleware fails CLOSED (503) if the `NEXT_PUBLIC_SUPABASE_*`
+  vars are missing.** GitHub crons need repo (Actions) secrets `HUBSPOT_PAT`, `SUPABASE_URL`,
+  `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY` (agent), `SLACK_BOT_TOKEN` (Slack Reports heartbeat +
+  run-once), and **`GH_DISPATCH_TOKEN`** (a fine-grained PAT minted by the `salesops-lab` GitHub
+  account, `actions:write` — powers the delta heartbeat self-redispatch, the admin add-user
+  owner-pull dispatch, the Slack Reports heartbeat self-redispatch, AND the Slack Reports "Run
+  Now"/"Send Test" dispatch; also lives in Vercel env for the server-action path; PATs are
+  repo-owner-scoped, so a repo transfer kills them — re-mint from the new owner).
 - **Ownership footprint (migrated to salesops@spyne.ai, 2026-07-14).** Repo:
   `salesops-lab/sdr-outreach-dashboard`; Vercel project `sdr-outreach-dashboard` under the salesops
   account (Hobby — no team members possible; the old kaus-spyne project was recreated, not
@@ -562,22 +564,41 @@ Intent · Not Interested · Referral · Demos · Meeting, + a team-totals row).
   TL sub-teams) — no separate team concept, and no new table: the only Supabase reads in this whole
   module are the pre-existing spine tables (`sdr_activities`, `sdr_deals`, `sdr_managers`,
   `sdr_roster`) already used everywhere else.
-- **Slack webhooks are never in code, a database, or the frontend.** Each `SLACK_REPORTS` entry
-  names a `channelEnvVar` (e.g. `SLACK_VAIBHAV_WEBHOOK`); `lib/slackReports/deliver.ts` resolves
-  `process.env[envVarKey]` at send time only. Every error path names the channel label + env var
-  key, never the resolved URL.
+- **Delivery is an image, not a text table — Slack has no HTML table primitive.**
+  `lib/slackReports/renderImage.ts` builds a small standalone HTML+CSS document that mirrors
+  `components/slackReports/PreviewTable.tsx`'s layout exactly (full column labels, spacious
+  padding, a red "TEST REPORT" banner in test mode), renders it with a headless Chromium
+  (`playwright`, a devDependency used only by `tsx` scripts — never bundled into the Next.js app),
+  and screenshots the card to a PNG. This duplicates *styling* between the web preview and the
+  image (an expected, inherent split between CSS-for-browser and CSS-for-screenshot) but never
+  duplicates *data* — both read the identical `CallBlitzReport` from `build.ts`. Incoming Webhooks
+  can't upload files, so delivery uses a **Slack Bot Token** instead: ONE shared `SLACK_BOT_TOKEN`
+  env var (not one webhook per channel) authenticates `lib/slackReports/deliver.ts`'s
+  `sendSlackImage()`, which drives Slack's file-upload-v2 REST flow
+  (`files.getUploadURLExternal` → POST bytes → `files.completeUploadExternal`) via plain `fetch` —
+  no Slack SDK dependency. Each `SLACK_REPORTS` entry names a `channelId` (the Slack channel's ID,
+  not a secret) rather than a webhook URL.
+- **A report can exclude specific reps entirely** — `SlackReportConfig.excludeOwnerNames` (roster
+  display names, case-insensitive) is applied in `build.ts` by filtering `ownerIds` *before*
+  loading any activity/deal data, so an excluded rep's numbers are dropped from both their row AND
+  `TEAM TOTAL` — there's no separate "hide this row" branch that could drift from the totals.
 - **Scheduler is a self-redispatching GitHub Actions heartbeat, with NO database involved** —
   `lib/slackReports/scheduler.ts` has no Supabase import of its own (though `build.ts` still reads
-  the pre-existing spine tables it always did). `dueSlotFor()`
-  (`lib/slackReports/dueSlot.ts`, pure) converts "now" to each report's configured tz via
-  `Intl.DateTimeFormat` and returns a slot string when due. Idempotency comes from **cadence, not a
-  claimed DB row**: the heartbeat's loop interval (~10 min) equals `dueSlotFor`'s tolerance window,
-  and `concurrency: cancel-in-progress: true` guarantees one loop instance at a time — so each
-  configured time fires once under normal operation. Accepted tradeoff for two fixed teams: a
+  the pre-existing spine tables it always did, and now also launches Chromium via `renderImage.ts`).
+  `dueSlotFor()` (`lib/slackReports/dueSlot.ts`, pure) converts "now" to each report's configured tz
+  via `Intl.DateTimeFormat` and returns a slot string when due. Idempotency comes from **cadence,
+  not a claimed DB row**: the heartbeat's loop interval (~10 min) equals `dueSlotFor`'s tolerance
+  window, and `concurrency: cancel-in-progress: true` guarantees one loop instance at a time — so
+  each configured time fires once under normal operation. Accepted tradeoff for two fixed teams: a
   redispatch race could in theory double-send once; there's no persistent run-history table, so
-  GitHub Actions' own run logs are the record of what fired. "Run Now" and "Send Test" call
-  `runOneReport()` **inline** in the server action (no GitHub dispatch) — there's no DB write
-  involved, just a spine read + one Slack POST, well inside a server action's time budget.
+  GitHub Actions' own run logs are the record of what fired.
+- **"Run Now"/"Send Test" dispatch a GitHub Actions run (`slack-reports-run-once.yml`), they don't
+  render inline.** A real headless Chromium is a poor fit for a Vercel serverless function
+  (cold-start size/time, memory limits on a Hobby plan) but a comfortable fit for a GitHub Actions
+  runner (a full VM, generous timeout) — so `app/slack-reports/actions.ts` only dispatches the
+  workflow (same `workflow_dispatch` pattern as `triggerOwnerPull()` in `app/admin/actions.ts`) and
+  reports "dispatched" rather than a synchronous success/failure; the actual send happens ~30-60s
+  later and shows up in Slack (or the Action's logs, on failure).
 - **Validate against the dashboard before enabling a real schedule**: compare a Call Blitz row for a
   known rep+day against `/api/rep/[ownerId]/calling?from=&to=` (`calls`/`connectedCalls` must match
   exactly; `meetings` may legitimately differ by any Meeting-Rescheduled call) and

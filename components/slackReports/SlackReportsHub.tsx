@@ -54,7 +54,7 @@ function ReportCard({ report }: { report: SlackReportConfig }) {
     if (!next || preview || loading) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/slack-reports/preview?managerKey=${encodeURIComponent(report.managerKey)}`);
+      const res = await fetch(`/api/slack-reports/preview?key=${encodeURIComponent(report.key)}`);
       const data = await res.json();
       setPreview(data.error ? null : data);
     } catch {
@@ -120,9 +120,11 @@ export default function SlackReportsHub({ reports }: { reports: SlackReportConfi
       <Surface className="p-4">
         <h3 className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-subtle">Slack Connections</h3>
         <p className="text-xs text-ink-muted">
-          Reports and their Slack channels are configured in <code>config/slack-reports.ts</code>. Each
-          entry names a server-side env var (e.g. <code>SLACK_VAIBHAV_WEBHOOK</code>) that holds the
-          webhook URL — the URL itself never lives in code, a database, or the browser.
+          Reports and their Slack channels are configured in <code>config/slack-reports.ts</code> (a
+          channel label + channel ID per report). Delivery is an image posted via a single shared
+          Slack bot token (<code>SLACK_BOT_TOKEN</code>) — the token itself never lives in code, a
+          database, or the browser. Run Now / Send Test dispatch a GitHub Actions run, so results
+          appear in Slack within about a minute rather than instantly.
         </p>
       </Surface>
     </div>
