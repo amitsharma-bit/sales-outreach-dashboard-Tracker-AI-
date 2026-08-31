@@ -31,9 +31,12 @@ the full **lead→demo→closure funnel** + **intelligence** on top:
   **Call Blitz** (Calls/Emails/Total Touches/Connected/High Intent/Low Intent/Not
   Interested/Referral/Demos/Meeting per rep + team totals). Pure metrics fold over the same spine
   reads + `config/dispositions.ts` predicates the rest of the app uses — no parallel calculation.
-  Per-team schedule (1-2x/day, day-of-week, IANA timezone) via a self-redispatching GitHub Actions
-  heartbeat; delivery is a Slack Incoming Webhook resolved server-side from an env var, never
-  stored or returned to the browser.
+  Report config (team/channel/schedule) is a plain code file (`config/slack-reports.ts`), **not a
+  database table** — a small fixed set of teams doesn't need admin-editable DB config, and this
+  avoids an extra schema + RLS + PostgREST-cache surface. Per-team schedule (1-2x/day,
+  day-of-week, IANA timezone) via a self-redispatching GitHub Actions heartbeat; delivery is a
+  Slack Incoming Webhook resolved server-side from an env var, never stored or returned to the
+  browser.
 
 Surfaces: **Overview** (`/`, the rep table + Demo funnel + SDR/AE toggle), **Accounts** (`/accounts`,
 owned book by demo-status with GD→rooftop→contact drill, Deal Health/Temperature + last-activity),
@@ -106,9 +109,10 @@ the Focus merge incl. revival-window edges (`intel-focus.test.ts`), and the Rada
 ranking incl. the zombie sink (`intel-radar.test.ts`); and the Slack Reports Call Blitz fold +
 scheduling-window check (`slack-reports.test.ts`) — 26 files / 254 tests in all. Never
 import a `server-only`-guarded module (`lib/supabase/admin.ts`,
-`lib/callquality/fetch.ts`, `lib/agent/openai|store|runner.ts`, `lib/slackReports/scheduler.ts`)
-from a test — it throws under vitest (the pure scheduling check lives in `lib/slackReports/dueSlot.ts`
-specifically so it can be imported from a test without pulling in `supabaseAdmin`).
+`lib/callquality/fetch.ts`, `lib/agent/openai|store|runner.ts`, `lib/slackReports/build.ts` — which
+transitively pulls in `supabaseAdmin` via `lib/spine/store.ts`/`lib/team/load.ts`) from a test — it
+throws under vitest (the pure scheduling check lives in `lib/slackReports/dueSlot.ts` specifically
+so it can be imported from a test without pulling any of that in).
 
 Node 22+ required (`engines.node`; workflows pin `node-version: 22`). Hard floor:
 `@supabase/supabase-js` needs a global `WebSocket` (Node 21+); on Node 20 every `supabaseAdmin()`
@@ -370,16 +374,16 @@ Deal Health, stage, at-risk/revive flags) and `last_activity` (date/type/outcome
   `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (auth) + `SUPABASE_SERVICE_ROLE_KEY`
   (spine + call-quality + agent, server-only); `OPENAI_API_KEY` (+ optional `OPENAI_MODEL`, default
   `gpt-4o-mini`) for the agent; `CRON_SECRET` (optional, `/api/sync/delta`); `BLOB_READ_WRITE_TOKEN`
-  (optional Blob fallback); one `SLACK_<NAME>_WEBHOOK` per Slack Reports destination (e.g.
-  `SLACK_VAIBHAV_WEBHOOK`, `SLACK_RAJVEER_WEBHOOK` — server-only, referenced by name only from
-  `sdr_slack_destinations.env_var_key`, never stored or logged as a value). **In prod the middleware
-  fails CLOSED (503) if the `NEXT_PUBLIC_SUPABASE_*` vars are missing.** GitHub crons need repo
-  (Actions) secrets `HUBSPOT_PAT`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`
-  (agent), every `SLACK_*_WEBHOOK` (Slack Reports heartbeat + run-once), and **`GH_DISPATCH_TOKEN`**
-  (a fine-grained PAT minted by the `salesops-lab` GitHub account, `actions:write` — powers the delta
+  (optional Blob fallback); one `SLACK_<NAME>_WEBHOOK` per `config/slack-reports.ts` entry (e.g.
+  `SLACK_VAIBHAV_WEBHOOK`, `SLACK_RAJVEER_WEBHOOK` — server-only, referenced by name only from that
+  config file's `channelEnvVar`, never stored in a database or logged as a value). **In prod the
+  middleware fails CLOSED (503) if the `NEXT_PUBLIC_SUPABASE_*` vars are missing.** GitHub crons need
+  repo (Actions) secrets `HUBSPOT_PAT`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`
+  (agent), every `SLACK_*_WEBHOOK` (Slack Reports heartbeat), and **`GH_DISPATCH_TOKEN`** (a
+  fine-grained PAT minted by the `salesops-lab` GitHub account, `actions:write` — powers the delta
   heartbeat self-redispatch, the admin add-user owner-pull dispatch, AND the Slack Reports heartbeat
-  self-redispatch + "Run Now" dispatch; also lives in Vercel env for the server-action path; PATs are
-  repo-owner-scoped, so a repo transfer kills them — re-mint from the new owner).
+  self-redispatch; also lives in Vercel env for the server-action path; PATs are repo-owner-scoped,
+  so a repo transfer kills them — re-mint from the new owner).
 - **Ownership footprint (migrated to salesops@spyne.ai, 2026-07-14).** Repo:
   `salesops-lab/sdr-outreach-dashboard`; Vercel project `sdr-outreach-dashboard` under the salesops
   account (Hobby — no team members possible; the old kaus-spyne project was recreated, not
@@ -529,10 +533,17 @@ Deal Health, stage, at-risk/revive flags) and `last_activity` (date/type/outcome
 ## Slack Reports (`lib/slackReports/*`, admin-only, `/slack-reports`)
 
 Automated per-team Slack digests, gated exactly like `/admin` (`viewer.isAdmin` at page level +
-`requireAdmin()` — now shared from `lib/access/requireAdmin.ts` — in every server action). First
+`requireAdmin()` — shared from `lib/access/requireAdmin.ts` — in every server action). First
 report type: **Call Blitz** (Rep · Calls · Emails · Total Touches · Connected · High Intent · Low
 Intent · Not Interested · Referral · Demos · Meeting, + a team-totals row).
 
+- **Config is code, not a database table.** `config/slack-reports.ts` (`SLACK_REPORTS`) is a plain
+  array — team, Slack channel, schedule, timezone — same pattern as the `config/team-structure.ts`
+  DB-fallback seed. A small, fixed set of teams doesn't need an admin-editable DB table (that was
+  tried and reverted: it added `sdr_slack_*` tables + RLS + a PostgREST schema-cache dependency for
+  no real benefit at this scale). Adding a team or changing a schedule is a code change + redeploy,
+  not a UI action. The `/slack-reports` page is therefore **read-only** (Preview / Send Test / Run
+  Now per configured report) — no Create/Edit/Delete/Duplicate.
 - **Reuse, never a parallel calculation.** `lib/slackReports/callBlitz.ts` (pure fold over
   `Activity[]`) imports only the shared predicates from `config/dispositions.ts`
   (`isConnected`/`isCallbackHigh`/`isCallbackLow`/`isNotInterested`/`isGaveReferral`,
@@ -548,28 +559,29 @@ Intent · Not Interested · Referral · Demos · Meeting, + a team-totals row).
   ctx)`, zero new date logic) — a report's configured timezone (default `Asia/Kolkata`) governs ONLY
   when the scheduler fires, never which calendar day of activity is reported. **Team** = an existing
   `sdr_managers` manager key, resolved via `sdrOwnersUnderManager()` (already recursively includes
-  TL sub-teams) — no separate team concept.
-- **Slack webhooks are never in the DB or the frontend.** `sdr_slack_destinations` stores only a
-  `channel_label` + `env_var_key` (the NAME of a server-only env var, e.g. `SLACK_VAIBHAV_WEBHOOK`);
-  `lib/slackReports/deliver.ts` resolves `process.env[envVarKey]` at send time only. Every error path
-  names the channel label + env var key, never the resolved URL — safe to persist in
-  `sdr_slack_report_runs.error_message` or show in the admin UI.
-- **Scheduler is a self-redispatching GitHub Actions heartbeat** (`slack-reports-heartbeat.yml`,
-  same pattern as `spine-delta-heartbeat.yml` — plain `schedule:` cron is confirmed throttled on this
-  repo), checking every ~10 min. `lib/slackReports/dueSlot.ts`'s pure `dueSlotFor()` converts "now" to
-  the report's configured tz via `Intl.DateTimeFormat` and returns an idempotency slot key
-  (`"YYYY-MM-DDTHH:MM"`) when a report is due; `sdr_slack_report_runs`'s `unique(report_id,
-  scheduled_for, triggered_by)` constraint is the duplicate-send guard (an overlapping cycle's claim
-  attempt just fails). Deliberately split into its own file (no `supabaseAdmin` import) so it's
-  unit-testable — `lib/slackReports/scheduler.ts` itself imports the server-only admin client and
-  must never be imported from a test. "Run Now" dispatches the separate one-shot
-  `slack-reports-run-once.yml` (mirrors `triggerOwnerPull()` in `app/admin/actions.ts`) rather than
-  sending inline, keeping a slow DB/Slack round-trip out of the Vercel request path.
+  TL sub-teams) — no separate team concept, and no new table: the only Supabase reads in this whole
+  module are the pre-existing spine tables (`sdr_activities`, `sdr_deals`, `sdr_managers`,
+  `sdr_roster`) already used everywhere else.
+- **Slack webhooks are never in code, a database, or the frontend.** Each `SLACK_REPORTS` entry
+  names a `channelEnvVar` (e.g. `SLACK_VAIBHAV_WEBHOOK`); `lib/slackReports/deliver.ts` resolves
+  `process.env[envVarKey]` at send time only. Every error path names the channel label + env var
+  key, never the resolved URL.
+- **Scheduler is a self-redispatching GitHub Actions heartbeat, with NO database involved** —
+  `lib/slackReports/scheduler.ts` has no Supabase import of its own (though `build.ts` still reads
+  the pre-existing spine tables it always did). `dueSlotFor()`
+  (`lib/slackReports/dueSlot.ts`, pure) converts "now" to each report's configured tz via
+  `Intl.DateTimeFormat` and returns a slot string when due. Idempotency comes from **cadence, not a
+  claimed DB row**: the heartbeat's loop interval (~10 min) equals `dueSlotFor`'s tolerance window,
+  and `concurrency: cancel-in-progress: true` guarantees one loop instance at a time — so each
+  configured time fires once under normal operation. Accepted tradeoff for two fixed teams: a
+  redispatch race could in theory double-send once; there's no persistent run-history table, so
+  GitHub Actions' own run logs are the record of what fired. "Run Now" and "Send Test" call
+  `runOneReport()` **inline** in the server action (no GitHub dispatch) — there's no DB write
+  involved, just a spine read + one Slack POST, well inside a server action's time budget.
 - **Validate against the dashboard before enabling a real schedule**: compare a Call Blitz row for a
   known rep+day against `/api/rep/[ownerId]/calling?from=&to=` (`calls`/`connectedCalls` must match
   exactly; `meetings` may legitimately differ by any Meeting-Rescheduled call) and
-  `/api/metrics/range` (`emails`/`demos`, same `aggregateRange()` engine). Use "Send Test" to iterate
-  — it never claims a scheduler idempotency slot, so it can't be confused with a real send.
+  `/api/metrics/range` (`emails`/`demos`, same `aggregateRange()` engine). Use "Send Test" to iterate.
 
 ## Derived-metric definitions (`lib/sync/aggregate.ts` unless noted)
 

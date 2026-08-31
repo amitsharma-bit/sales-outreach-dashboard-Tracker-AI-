@@ -1,34 +1,21 @@
 import { redirect } from "next/navigation";
 import { Radio } from "lucide-react";
 import { supabaseServer } from "../../lib/supabase/server";
-import { supabaseAdmin } from "../../lib/supabase/admin";
 import { resolveViewer } from "../../lib/access/resolve";
-import { loadTeamStructure } from "../../lib/team/load";
+import { SLACK_REPORTS } from "../../config/slack-reports";
 import AppNav from "../../components/AppNav";
 import SlackReportsHub from "../../components/slackReports/SlackReportsHub";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function rows<T>(q: PromiseLike<{ data: T[] | null }> | undefined): Promise<T[]> {
-  if (!q) return [];
-  const { data } = await q;
-  return data ?? [];
-}
-
-/** Slack Reports — admin-only automated report configuration + scheduling. Gated exactly like
- *  /admin: page-level redirect + a re-derived requireAdmin() check in every server action. */
+/** Slack Reports — admin-only. Reports are a static list (config/slack-reports.ts, not a
+ *  database table — see that file's header comment for why). Gated exactly like /admin
+ *  (page-level redirect + a re-derived requireAdmin() check in every server action). */
 export default async function SlackReportsPage() {
   const { data: { user } } = await supabaseServer().auth.getUser();
   const viewer = await resolveViewer(user?.email ?? "");
   if (!viewer.isAdmin) redirect("/");
-
-  const sb = supabaseAdmin();
-  const [ts, reports, destinations] = await Promise.all([
-    loadTeamStructure({ fresh: true }),
-    rows(sb?.from("sdr_slack_reports").select("*").order("created_at", { ascending: false })),
-    rows(sb?.from("sdr_slack_destinations").select("*").order("channel_label")),
-  ]);
 
   return (
     <>
@@ -43,11 +30,7 @@ export default async function SlackReportsPage() {
             <p className="mt-0.5 text-sm text-ink-muted">Automate and manage sales activity reports sent to Slack.</p>
           </div>
         </header>
-        <SlackReportsHub
-          reports={reports}
-          destinations={destinations}
-          managers={Object.values(ts.managers)}
-        />
+        <SlackReportsHub reports={SLACK_REPORTS} />
       </main>
     </>
   );
