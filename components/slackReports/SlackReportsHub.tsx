@@ -2,47 +2,25 @@
 
 import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
-import { Plus, Radio } from "lucide-react";
-import { setReportEnabled, deleteReport, duplicateReport, sendTestReport, runReportNow } from "../../app/slack-reports/actions";
+import { Radio } from "lucide-react";
+import { sendTestReport, runReportNow } from "../../app/slack-reports/actions";
 import { Chip, Surface } from "../ui";
-import ReportForm, { ManagerOption, ReportRow } from "./ReportForm";
-import DestinationsManager, { DestinationRow } from "./DestinationsManager";
-import RunHistory from "./RunHistory";
+import { SlackReportConfig } from "../../config/slack-reports";
+import { CallBlitzReport } from "../../lib/slackReports/callBlitz";
+import PreviewTable from "./PreviewTable";
 
 type ActionResult = { ok: boolean; message: string } | null;
 
 const REPORT_TYPE_LABEL: Record<string, string> = { call_blitz: "Call Blitz Report" };
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function fmtSchedule(r: ReportRow): string {
-  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function fmtSchedule(r: SlackReportConfig): string {
   const days = [...r.schedule.daysOfWeek].sort();
   const daysStr = days.length === 7 ? "Every day"
     : JSON.stringify(days) === JSON.stringify([1, 2, 3, 4, 5]) ? "Mon–Fri"
-    : days.map((d) => dayLabels[d]).join(", ");
+    : days.map((d) => DAY_LABELS[d]).join(", ");
   const times = [r.schedule.time1, r.schedule.time2].filter(Boolean).join(" · ");
   return `${daysStr} · ${times}`;
-}
-
-function TestButton({ reportId }: { reportId: string }) {
-  const [state, formAction] = useFormState<ActionResult, FormData>(sendTestReport, null);
-  return (
-    <form action={formAction} className="inline-flex flex-col items-start gap-1">
-      <input type="hidden" name="id" value={reportId} />
-      <SmallSubmit label="Send Test" />
-      {state && <span className={`text-xs ${state.ok ? "text-good" : "text-danger"}`}>{state.message}</span>}
-    </form>
-  );
-}
-
-function RunNowButton({ reportId }: { reportId: string }) {
-  const [state, formAction] = useFormState<ActionResult, FormData>(runReportNow, null);
-  return (
-    <form action={formAction} className="inline-flex flex-col items-start gap-1">
-      <input type="hidden" name="id" value={reportId} />
-      <SmallSubmit label="Run Now" />
-      {state && <span className={`text-xs ${state.ok ? "text-good" : "text-danger"}`}>{state.message}</span>}
-    </form>
-  );
 }
 
 function SmallSubmit({ label }: { label: string }) {
@@ -54,14 +32,38 @@ function SmallSubmit({ label }: { label: string }) {
   );
 }
 
-type ReportListRow = ReportRow & { report_type?: string; created_at?: string; last_run_at: string | null; next_run_at: string | null };
+function ActionButton({ action, reportKey, label }: { action: (prev: ActionResult, fd: FormData) => Promise<ActionResult>; reportKey: string; label: string }) {
+  const [state, formAction] = useFormState<ActionResult, FormData>(action, null);
+  return (
+    <form action={formAction} className="inline-flex flex-col items-start gap-1">
+      <input type="hidden" name="key" value={reportKey} />
+      <SmallSubmit label={label} />
+      {state && <span className={`text-xs ${state.ok ? "text-good" : "text-danger"}`}>{state.message}</span>}
+    </form>
+  );
+}
 
-function ReportCard({ report, onEdit, expanded, onToggleHistory }: {
-  report: ReportListRow;
-  onEdit: () => void;
-  expanded: boolean;
-  onToggleHistory: () => void;
-}) {
+function ReportCard({ report }: { report: SlackReportConfig }) {
+  const [showPreview, setShowPreview] = useState(false);
+  const [preview, setPreview] = useState<CallBlitzReport | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function togglePreview() {
+    const next = !showPreview;
+    setShowPreview(next);
+    if (!next || preview || loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/slack-reports/preview?managerKey=${encodeURIComponent(report.managerKey)}`);
+      const data = await res.json();
+      setPreview(data.error ? null : data);
+    } catch {
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <Surface className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -72,107 +74,57 @@ function ReportCard({ report, onEdit, expanded, onToggleHistory }: {
             <Chip tone={report.enabled ? "good" : "neutral"}>{report.enabled ? "● Active" : "○ Disabled"}</Chip>
           </div>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-ink-muted">
-            <dt>Type</dt><dd>{REPORT_TYPE_LABEL[report.report_type ?? "call_blitz"] ?? "Call Blitz Report"}</dd>
+            <dt>Type</dt><dd>{REPORT_TYPE_LABEL[report.reportType] ?? report.reportType}</dd>
+            <dt>Channel</dt><dd>{report.channelLabel}</dd>
             <dt>Schedule</dt><dd>{fmtSchedule(report)}</dd>
             <dt>Timezone</dt><dd>{report.timezone}</dd>
-            <dt>Last sent</dt><dd>{report.last_run_at ? new Date(report.last_run_at).toLocaleString() : "—"}</dd>
           </dl>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onEdit} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-muted">Edit</button>
-          <RunNowButton reportId={report.id} />
-          <TestButton reportId={report.id} />
-          <form action={setReportEnabled}>
-            <input type="hidden" name="id" value={report.id} />
-            <input type="hidden" name="enabled" value={String(!report.enabled)} />
-            <button className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-muted">
-              {report.enabled ? "Disable" : "Enable"}
-            </button>
-          </form>
-          <form action={duplicateReport}>
-            <input type="hidden" name="id" value={report.id} />
-            <button className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-muted">Duplicate</button>
-          </form>
-          <form action={deleteReport} onSubmit={(e) => { if (!confirm(`Delete "${report.name}"? This permanently removes the report configuration and its schedule.`)) e.preventDefault(); }}>
-            <input type="hidden" name="id" value={report.id} />
-            <button className="rounded-lg border border-danger/30 px-2.5 py-1 text-xs font-semibold text-danger hover:bg-danger-weak">Delete</button>
-          </form>
-          <button onClick={onToggleHistory} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-muted">
-            {expanded ? "Hide history" : "History"}
+          <button onClick={togglePreview} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-muted">
+            {showPreview ? "Hide preview" : "Preview"}
           </button>
+          <ActionButton action={runReportNow} reportKey={report.key} label="Run Now" />
+          <ActionButton action={sendTestReport} reportKey={report.key} label="Send Test" />
         </div>
       </div>
-      {expanded && <div className="mt-4"><RunHistory reportId={report.id} /></div>}
+      {showPreview && (
+        <div className="mt-4">
+          {loading && <p className="text-sm text-ink-muted">Loading preview…</p>}
+          {!loading && preview && <PreviewTable report={preview} />}
+          {!loading && !preview && <p className="text-sm text-danger">Could not load preview.</p>}
+        </div>
+      )}
     </Surface>
   );
 }
 
-export default function SlackReportsHub({
-  reports, destinations, managers,
-}: {
-  reports: ReportListRow[];
-  destinations: DestinationRow[];
-  managers: ManagerOption[];
-}) {
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<ReportListRow | null>(null);
-  const [historyId, setHistoryId] = useState<string | null>(null);
-
-  const formOpen = creating || editing != null;
-
+export default function SlackReportsHub({ reports }: { reports: SlackReportConfig[] }) {
   return (
     <div className="grid gap-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-ink-subtle">Active Reports</h2>
-        {!formOpen && (
-          <button
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-fg hover:bg-primary-strong"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.4} /> Create Report
-          </button>
-        )}
-      </div>
+      <h2 className="text-sm font-bold uppercase tracking-wide text-ink-subtle">Active Reports</h2>
 
-      {formOpen && (
-        <ReportForm
-          managers={managers}
-          destinations={destinations}
-          existing={editing}
-          onClose={() => { setCreating(false); setEditing(null); }}
-        />
-      )}
-
-      {!formOpen && reports.length === 0 && (
+      {reports.length === 0 ? (
         <Surface className="p-10 text-center">
-          <p className="text-sm font-semibold text-ink">No automated reports configured yet.</p>
+          <p className="text-sm font-semibold text-ink">No Slack reports configured.</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-ink-muted">
-            Create a report to automatically send sales activity reports to your Slack channels.
+            Add an entry to <code>config/slack-reports.ts</code> and redeploy to enable one.
           </p>
-          <button
-            onClick={() => setCreating(true)}
-            className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-fg hover:bg-primary-strong"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.4} /> Create Slack Report
-          </button>
         </Surface>
-      )}
-
-      {!formOpen && reports.length > 0 && (
+      ) : (
         <div className="grid gap-3">
-          {reports.map((r) => (
-            <ReportCard
-              key={r.id}
-              report={r}
-              onEdit={() => setEditing(r)}
-              expanded={historyId === r.id}
-              onToggleHistory={() => setHistoryId(historyId === r.id ? null : r.id)}
-            />
-          ))}
+          {reports.map((r) => <ReportCard key={r.key} report={r} />)}
         </div>
       )}
 
-      <DestinationsManager destinations={destinations} />
+      <Surface className="p-4">
+        <h3 className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-subtle">Slack Connections</h3>
+        <p className="text-xs text-ink-muted">
+          Reports and their Slack channels are configured in <code>config/slack-reports.ts</code>. Each
+          entry names a server-side env var (e.g. <code>SLACK_VAIBHAV_WEBHOOK</code>) that holds the
+          webhook URL — the URL itself never lives in code, a database, or the browser.
+        </p>
+      </Surface>
     </div>
   );
 }

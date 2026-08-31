@@ -1,7 +1,7 @@
 /** Slack Incoming Webhook delivery. The webhook URL is resolved from `process.env[envVarKey]` at
- *  send time ONLY — never stored in the DB, never returned by any API route, never logged.
- *  Errors name the channel label + env var KEY NAME, never the resolved URL (safe to persist in
- *  sdr_slack_report_runs.error_message or show in the admin UI). */
+ *  send time ONLY — never stored in code, a database, or returned by any API route, never logged.
+ *  Errors name the channel label + env var KEY NAME, never the resolved URL (safe to log or show
+ *  in the UI). */
 export interface SlackDestinationRef {
   channelLabel: string;
   envVarKey: string;
