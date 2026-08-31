@@ -4,7 +4,7 @@ import LogoutButton from "./LogoutButton";
 import ThemeToggle from "./ThemeToggle";
 import { cn } from "./ui";
 
-type Tab = "overview" | "accounts" | "attention" | "admin";
+type Tab = "overview" | "accounts" | "attention" | "slack-reports" | "admin";
 const TABS: { key: Tab; label: string; href: string }[] = [
   { key: "overview", label: "Overview", href: "/" },
   { key: "accounts", label: "Deals & Accounts", href: "/accounts" },
@@ -36,6 +36,7 @@ export default function AppNav({ active, viewer }: { active: Tab; viewer: Viewer
         </a>
         <div className="flex items-center gap-1">
           {TABS.map((t) => tab(t.key, t.label, t.href))}
+          {viewer.isAdmin && tab("slack-reports", "Slack Reports", "/slack-reports")}
           {viewer.isAdmin && tab("admin", "Admin", "/admin")}
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">

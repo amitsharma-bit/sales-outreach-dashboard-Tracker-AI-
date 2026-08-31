@@ -2,15 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "../../lib/supabase/admin";
-import { supabaseServer } from "../../lib/supabase/server";
-import { resolveViewer } from "../../lib/access/resolve";
+import { requireAdmin } from "../../lib/access/requireAdmin";
 import { invalidateTeamCache } from "../../lib/team/load";
-
-async function requireAdmin() {
-  const { data: { user } } = await supabaseServer().auth.getUser();
-  const viewer = await resolveViewer(user?.email ?? "");
-  if (!viewer.isAdmin) throw new Error("forbidden");
-}
 
 function str(fd: FormData, key: string): string { return String(fd.get(key) ?? "").trim(); }
 /** Stable key from a display name: lowercase first token, alnum only (e.g. "Prabhjeet Kaur" → "prabhjeet"). */
