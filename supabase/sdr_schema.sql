@@ -545,6 +545,56 @@ create table if not exists sdr_roster (
 create index if not exists idx_sdr_roster_active on sdr_roster(active);
 create index if not exists idx_sdr_roster_email on sdr_roster(lower(email));
 
+-- ── Slack Reports (Call Blitz + future report types) ──────────────────────────
+-- gen_random_uuid() needs pgcrypto (not otherwise enabled in this schema).
+create extension if not exists pgcrypto;
+
+-- Slack destinations: admin-editable label + which env var holds the webhook. The webhook URL
+-- itself is NEVER stored here — resolved server-side at send time via process.env[env_var_key].
+create table if not exists sdr_slack_destinations (
+  id            uuid primary key default gen_random_uuid(),
+  channel_label text not null,              -- e.g. "#team-vaibhav" (display only)
+  env_var_key   text not null unique,       -- e.g. "SLACK_VAIBHAV_WEBHOOK"
+  active        boolean not null default true,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+-- Report configs. First report_type = 'call_blitz'; schema is additive-friendly for more later.
+create table if not exists sdr_slack_reports (
+  id                   uuid primary key default gen_random_uuid(),
+  name                 text not null,
+  report_type          text not null default 'call_blitz' check (report_type in ('call_blitz')),
+  manager_key          text not null,          -- → sdr_managers.manager_key (team scope)
+  slack_destination_id uuid not null references sdr_slack_destinations(id),
+  enabled              boolean not null default true,
+  timezone             text not null default 'Asia/Kolkata',  -- IANA tz; governs WHEN the cron fires only
+  schedule             jsonb not null default '{"daysOfWeek":[1,2,3,4,5],"time1":"10:00","time2":null}'::jsonb,
+  created_by           text,                    -- admin email
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now(),
+  last_run_at          timestamptz,
+  next_run_at          timestamptz
+);
+create index if not exists idx_slack_reports_enabled on sdr_slack_reports(enabled);
+
+-- Run history / idempotency ledger. One row per (report, scheduled slot, trigger kind) attempt.
+create table if not exists sdr_slack_report_runs (
+  id            uuid primary key default gen_random_uuid(),
+  report_id     uuid not null references sdr_slack_reports(id) on delete cascade,
+  scheduled_for text not null,   -- idempotency key: "YYYY-MM-DDTHH:MM" in the report's configured tz
+  started_at    timestamptz not null default now(),
+  finished_at   timestamptz,
+  status        text not null default 'running' check (status in ('running','success','failed','skipped')),
+  error_message text,            -- safe, human-readable only — never a raw webhook URL or secret
+  team          text,            -- manager_key/name snapshot at run time (survives report edit/delete)
+  channel       text,            -- channel_label snapshot at run time
+  duration_ms   integer,
+  triggered_by  text not null default 'scheduler' check (triggered_by in ('scheduler','test','manual')),
+  unique (report_id, scheduled_for, triggered_by)
+);
+create index if not exists idx_slack_report_runs_report on sdr_slack_report_runs(report_id, started_at desc);
+
 -- Seeds (idempotent)
 insert into sdr_sync_state(key) values ('calls'),('emails'),('companies'),('deals'),('owners'),('lock'),('agent')
   on conflict (key) do nothing;
@@ -571,7 +621,9 @@ begin
                            'sdr_deal_stage_events','sdr_contact_companies','sdr_agent_briefs',
                            'sdr_embeddings',
                            -- Intelligence 2.0 (sdr_intel_asks intentionally EXCLUDED — private)
-                           'sdr_intel_signals','sdr_intel_scans','sdr_agent_actions']
+                           'sdr_intel_signals','sdr_intel_scans','sdr_agent_actions',
+                           -- Slack Reports
+                           'sdr_slack_destinations','sdr_slack_reports','sdr_slack_report_runs']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists %I on %I', t || '_spyne_select', t);

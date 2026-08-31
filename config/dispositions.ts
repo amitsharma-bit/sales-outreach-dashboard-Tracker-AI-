@@ -52,6 +52,7 @@ export const MEETING_RESCHEDULED_GUID = "2aa923e7-3887-4e12-a944-cb7871fe09e3";
 export const CALLBACK_HIGH_GUID = "af20b15f-39a5-4a40-94e4-63cbe341cf1b";
 export const CALLBACK_LOW_GUID = "c7480f13-6eba-48d0-b203-40715b7ffc4d";
 export const GAVE_REFERRAL_GUID = "69252e11-115b-4049-89cd-4952b899a4fc";
+export const NOT_INTERESTED_GUID = "09a2d1c9-49ef-4371-8968-0af01bca7893";
 
 /**
  * High-intent outcomes that make an account "hot" on a single occurrence.
@@ -108,6 +109,10 @@ export function isCallbackLow(guid: string | null | undefined): boolean {
 
 export function isGaveReferral(guid: string | null | undefined): boolean {
   return guid === GAVE_REFERRAL_GUID;
+}
+
+export function isNotInterested(guid: string | null | undefined): boolean {
+  return guid === NOT_INTERESTED_GUID;
 }
 
 /** A disqualifying outcome (buyer rejection or dead-end contact data). */
