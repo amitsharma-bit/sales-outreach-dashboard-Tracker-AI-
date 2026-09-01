@@ -38,7 +38,7 @@ export const SLACK_REPORTS: SlackReportConfig[] = [
     reportType: "call_blitz",
     managerKey: "rajveer",
     channelLabel: "#team-rajveer",
-    channelId: "REPLACE_WITH_TEAM_RAJVEER_CHANNEL_ID",
+    channelId: "C09ABQD7Z32",
     excludeOwnerNames: ["Rajveer Singh"],
   },
 ];
