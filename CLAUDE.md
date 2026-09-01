@@ -108,7 +108,7 @@ chunk composer (`embed-chunks.test.ts`), the calling drill-down builder (`callin
 and the Intelligence 2.0 pure logic — signal prompt/coercion/rescan (`intel-signals.test.ts`),
 the Focus merge incl. revival-window edges (`intel-focus.test.ts`), and the Radar
 ranking incl. the zombie sink (`intel-radar.test.ts`); and the Slack Reports Call Blitz fold +
-scheduling-window check (`slack-reports.test.ts`) — 26 files / 254 tests in all. Never
+scheduling-window check (`slack-reports.test.ts`) — 26 files / 259 tests in all. Never
 import a `server-only`-guarded module (`lib/supabase/admin.ts`,
 `lib/callquality/fetch.ts`, `lib/agent/openai|store|runner.ts`, `lib/slackReports/build.ts` — which
 transitively pulls in `supabaseAdmin` via `lib/spine/store.ts`/`lib/team/load.ts`) from a test — it
@@ -544,8 +544,10 @@ Intent · Not Interested · Referral · Demos · Meeting, + a team-totals row).
   DB-fallback seed. A small, fixed set of teams doesn't need an admin-editable DB table (that was
   tried and reverted: it added `sdr_slack_*` tables + RLS + a PostgREST schema-cache dependency for
   no real benefit at this scale). Adding a team or changing a schedule is a code change + redeploy,
-  not a UI action. The `/slack-reports` page is therefore **read-only** (Preview / Send Test / Run
-  Now per configured report) — no Create/Edit/Delete/Duplicate.
+  not a UI action. The `/slack-reports` page is therefore **read-only on identity/schedule TIMES**
+  (Preview / Send Test / Run Now per configured report) — no Create/Edit/Delete/Duplicate. The one
+  runtime-toggleable bit is whether the schedule is currently on at all (see the Stop/Start bullet
+  below) — that's state, not config, so it's the one thing intentionally NOT in this file.
 - **Reuse, never a parallel calculation.** `lib/slackReports/callBlitz.ts` (pure fold over
   `Activity[]`) imports only the shared predicates from `config/dispositions.ts`
   (`isConnected`/`isCallbackHigh`/`isCallbackLow`/`isNotInterested`/`isGaveReferral`,
@@ -582,6 +584,25 @@ Intent · Not Interested · Referral · Demos · Meeting, + a team-totals row).
   display names, case-insensitive) is applied in `build.ts` by filtering `ownerIds` *before*
   loading any activity/deal data, so an excluded rep's numbers are dropped from both their row AND
   `TEAM TOTAL` — there's no separate "hide this row" branch that could drift from the totals.
+- **"Stop Schedule" / "Start Schedule" is the one piece of runtime state, and it reuses the
+  existing `sdr_sync_state` table rather than adding a new one.** `lib/slackReports/state.ts`
+  stores a boolean `enabled` column (added via `alter table`) on a `slack:<report key>` row —
+  exactly the same table every sync job already uses for its watermark/health row, just a new
+  column and two new keys. `runScheduler()` checks this DB flag (falling back to the config file's
+  compile-time `enabled` if the DB is unreachable), never the static config alone, so the button
+  takes effect immediately with no redeploy. Stopping/starting **only** flips this flag — it never
+  touches `config/slack-reports.ts`, never disables Preview/Run Now/Send Test (those call
+  `runOneReport()` directly, which has no enabled-check at all), and the confirmation dialog before
+  stopping is a plain `window.confirm()`, not a custom modal component. The same table's existing
+  `last_run_at`/`last_duration_ms`/`last_counts`/`notes` columns double as the "last run"
+  status shown on each card (`recordRunResult()` in `state.ts`) — distinguishing an image-render
+  failure from a Slack-delivery failure in `notes`, and skipping the write entirely for test sends
+  so a test can never be mistaken for the report's real last-run status.
+- **`nextRunAt()`** (`lib/slackReports/dueSlot.ts`, pure) computes the next scheduled fire time for
+  the "Next Run" label — a generalized, arbitrary-timezone version of the offset-correction-pass
+  technique `lib/sync/buckets.ts`'s `etMidnightUtcMs` uses for US/Eastern, searching up to 8 days
+  ahead for the next allowed day-of-week. Split from `scheduler.ts` for the same reason as
+  `dueSlotFor` — no server-only import, so it stays unit-testable.
 - **Scheduler is a self-redispatching GitHub Actions heartbeat, with NO database involved** —
   `lib/slackReports/scheduler.ts` has no Supabase import of its own (though `build.ts` still reads
   the pre-existing spine tables it always did, and now also launches Chromium via `renderImage.ts`).

@@ -159,6 +159,10 @@ create table if not exists sdr_sync_state (
   notes            text,
   lock_until       timestamptz
 );
+-- Slack Reports' "Stop Schedule"/"Start Schedule" toggle (lib/slackReports/state.ts, key
+-- "slack:<report key>") — reuses this table rather than a new one; added via ALTER so existing
+-- installs pick it up.
+alter table sdr_sync_state add column if not exists enabled boolean not null default true;
 
 create table if not exists sdr_snapshots (
   id           integer primary key check (id = 1),
@@ -551,7 +555,8 @@ create index if not exists idx_sdr_roster_email on sdr_roster(lower(email));
 -- membership and sdr_activities/sdr_deals for report data; no new tables required.
 
 -- Seeds (idempotent)
-insert into sdr_sync_state(key) values ('calls'),('emails'),('companies'),('deals'),('owners'),('lock'),('agent')
+insert into sdr_sync_state(key) values ('calls'),('emails'),('companies'),('deals'),('owners'),('lock'),('agent'),
+  ('slack:vaibhav-call-blitz'),('slack:rajveer-call-blitz')
   on conflict (key) do nothing;
 
 insert into sdr_roles(email, role, team_id) values

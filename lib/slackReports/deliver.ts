@@ -9,6 +9,8 @@
  *   1. files.getUploadURLExternal — reserve an upload slot for the file.
  *   2. POST the raw bytes to the returned upload_url.
  *   3. files.completeUploadExternal — finalize the upload and share it into the target channel.
+ * The image IS the report — `opts.caption` is only the short "📊 CALL BLITZ REPORT / date · team"
+ * intro line (Slack's initial_comment on the upload), never a re-rendering of the table as text.
  */
 const SLACK_API = "https://slack.com/api";
 
@@ -31,7 +33,7 @@ async function slackApi<T>(token: string, method: string, body: URLSearchParams 
   return json;
 }
 
-export async function sendSlackImage(channelId: string, png: Buffer, opts: { title: string; test?: boolean }): Promise<void> {
+export async function sendSlackImage(channelId: string, png: Buffer, opts: { title: string; caption?: string; test?: boolean }): Promise<void> {
   const token = botToken();
   const filename = `call-blitz-${Date.now()}.png`;
 
@@ -53,12 +55,14 @@ export async function sendSlackImage(channelId: string, png: Buffer, opts: { tit
     throw new Error(`Slack file upload to channel ${channelId} failed: HTTP ${uploadRes.status}`);
   }
 
+  const caption = opts.test ? `🧪 TEST REPORT\n${opts.caption ?? ""}`.trim() : opts.caption;
   try {
     await slackApi(
       token, "files.completeUploadExternal",
       JSON.stringify({
         files: [{ id: fileId, title: opts.test ? `🧪 TEST — ${opts.title}` : opts.title }],
         channel_id: channelId,
+        ...(caption ? { initial_comment: caption } : {}),
       }),
       "application/json; charset=utf-8",
     );

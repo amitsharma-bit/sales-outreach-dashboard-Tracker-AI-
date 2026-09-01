@@ -18,6 +18,10 @@ export interface SlackReportConfig {
   managerKey: string; // → sdr_managers.manager_key (existing team scope, unchanged)
   channelLabel: string; // e.g. "#team-vaibhav" — display only
   channelId: string; // Slack channel ID (e.g. "C0123ABC456") — where the image is posted
+  /** Compile-time default only. The LIVE on/off state is a single boolean in the existing
+   *  sdr_sync_state table (key "slack:<key>", see lib/slackReports/state.ts) so the "Stop
+   *  Schedule"/"Start Schedule" button can flip it at runtime without a redeploy — this field is
+   *  just what a brand-new report starts as before any DB row exists (or if the DB is down). */
   enabled: boolean;
   timezone: string; // IANA tz — governs WHEN the scheduler fires, never the reporting day
   schedule: ReportSchedule;
@@ -37,7 +41,7 @@ export const SLACK_REPORTS: SlackReportConfig[] = [
     channelId: "REPLACE_WITH_TEAM_VAIBHAV_CHANNEL_ID",
     enabled: true,
     timezone: "Asia/Kolkata",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:30", time2: "02:55" },
+    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:25", time2: "02:55" },
   },
   {
     key: "rajveer-call-blitz",
@@ -48,7 +52,7 @@ export const SLACK_REPORTS: SlackReportConfig[] = [
     channelId: "REPLACE_WITH_TEAM_RAJVEER_CHANNEL_ID",
     enabled: true,
     timezone: "Asia/Kolkata",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:30", time2: "02:55" },
+    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:25", time2: "02:55" },
     excludeOwnerNames: ["Rajveer Singh"],
   },
 ];
