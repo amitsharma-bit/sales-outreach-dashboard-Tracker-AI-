@@ -4,8 +4,10 @@
  * PostgREST schema-cache sync). Same pattern as config/team-structure.ts: a developer edits this
  * file and redeploys to add/change a report — no migration, no schema to apply.
  *
- * The webhook URL itself is NEVER here — `channelEnvVar` only names the server-side env var
- * (e.g. SLACK_VAIBHAV_WEBHOOK) that lib/slackReports/deliver.ts resolves at send time.
+ * Delivery is an image (rendered to match the web Preview panel exactly), posted via a Slack Bot
+ * Token file upload — Incoming Webhooks can't upload files. `channelId` is the Slack channel's ID
+ * (not a secret, just an identifier — e.g. "C0123ABC456", found via channel details in Slack), and
+ * the ONE shared `SLACK_BOT_TOKEN` env var (lib/slackReports/deliver.ts) authenticates the upload.
  */
 import { ReportSchedule } from "../lib/slackReports/types";
 
@@ -15,10 +17,18 @@ export interface SlackReportConfig {
   reportType: "call_blitz";
   managerKey: string; // → sdr_managers.manager_key (existing team scope, unchanged)
   channelLabel: string; // e.g. "#team-vaibhav" — display only
-  channelEnvVar: string; // e.g. "SLACK_VAIBHAV_WEBHOOK" — the env var holding the webhook URL
+  channelId: string; // Slack channel ID (e.g. "C0123ABC456") — where the image is posted
+  /** Compile-time default only. The LIVE on/off state is a single boolean in the existing
+   *  sdr_sync_state table (key "slack:<key>", see lib/slackReports/state.ts) so the "Stop
+   *  Schedule"/"Start Schedule" button can flip it at runtime without a redeploy — this field is
+   *  just what a brand-new report starts as before any DB row exists (or if the DB is down). */
   enabled: boolean;
   timezone: string; // IANA tz — governs WHEN the scheduler fires, never the reporting day
   schedule: ReportSchedule;
+  /** Roster display names (sdr_roster.name, case-insensitive) to leave out of BOTH the table rows
+   *  and TEAM TOTAL entirely — e.g. a player-coach manager who doesn't want his own light call
+   *  volume skewing or appearing in his team's report. */
+  excludeOwnerNames?: string[];
 }
 
 export const SLACK_REPORTS: SlackReportConfig[] = [
@@ -28,10 +38,10 @@ export const SLACK_REPORTS: SlackReportConfig[] = [
     reportType: "call_blitz",
     managerKey: "vaibhav",
     channelLabel: "#team-vaibhav",
-    channelEnvVar: "SLACK_VAIBHAV_WEBHOOK",
+    channelId: "REPLACE_WITH_TEAM_VAIBHAV_CHANNEL_ID",
     enabled: true,
     timezone: "Asia/Kolkata",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "10:00", time2: "16:00" },
+    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:25", time2: "02:55" },
   },
   {
     key: "rajveer-call-blitz",
@@ -39,10 +49,11 @@ export const SLACK_REPORTS: SlackReportConfig[] = [
     reportType: "call_blitz",
     managerKey: "rajveer",
     channelLabel: "#team-rajveer",
-    channelEnvVar: "SLACK_RAJVEER_WEBHOOK",
+    channelId: "REPLACE_WITH_TEAM_RAJVEER_CHANNEL_ID",
     enabled: true,
     timezone: "Asia/Kolkata",
-    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "10:00", time2: "16:00" },
+    schedule: { daysOfWeek: [1, 2, 3, 4, 5], time1: "21:25", time2: "02:55" },
+    excludeOwnerNames: ["Rajveer Singh"],
   },
 ];
 
